@@ -92,6 +92,9 @@
   .entry-del{position:absolute;top:9px;right:9px;width:26px;height:26px;border-radius:7px;
     color:var(--muted2);font-size:15px;display:flex;align-items:center;justify-content:center}
   .entry-del:active{background:var(--surface2);color:var(--danger)}
+  .entry-repeat{position:absolute;top:9px;right:41px;width:26px;height:26px;border-radius:7px;
+    color:var(--muted2);font-size:16px;display:flex;align-items:center;justify-content:center}
+  .entry-repeat:active{background:var(--surface2);color:var(--amber)}
 
   .empty-state{text-align:center;padding:48px 20px;color:var(--muted)}
   .empty-state .big{font-family:var(--display);font-size:17px;color:var(--text);margin-bottom:6px}
@@ -257,6 +260,11 @@
         <button class="data-btn" id="exportJson">Export full backup (JSON)</button>
       </div>
       <div class="data-card">
+        <h3>Saved quick meals</h3>
+        <p>Meals you've saved for one-tap logging. Remove any you no longer use.</p>
+        <div id="tplManageList"></div>
+      </div>
+      <div class="data-card">
         <h3>Restore</h3>
         <p>Load a backup file. Use this after re-uploading the app, or to move data to a new phone.</p>
         <button class="data-btn" id="importBtn">Import backup</button>
@@ -292,12 +300,16 @@
     <button class="sheet-close" id="closeSheet">Cancel</button>
   </div>
   <div class="sheet-body">
+    <div class="field" id="quickField" style="display:none">
+      <label class="field-label">Quick meals · tap to fill</label>
+      <div class="chiprow" id="quickRow"></div>
+    </div>
     <div class="field">
       <label class="field-label">Photo (optional)</label>
       <label class="photo-zone" id="photoZone">
         <span class="icon">📷</span>
         <span class="hint">Tap to take or choose a photo</span>
-        <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none">
+        <input type="file" id="photoInput" accept="image/*" style="display:none">
       </label>
     </div>
 
@@ -343,6 +355,13 @@
       <textarea id="notesInput" placeholder="Ate fast / post-basketball / felt sluggish after / social dinner..." style="min-height:54px"></textarea>
     </div>
 
+    <div class="field" style="margin-bottom:14px">
+      <div class="chiprow">
+        <button class="selchip" id="saveTplToggle" style="width:100%;text-align:left">☆ Save as a quick meal for next time</button>
+      </div>
+      <input type="text" id="tplName" placeholder="Name it, e.g. Morning protein shake" style="display:none;margin-top:9px">
+    </div>
+
     <button class="save-btn" id="saveEntry" disabled>Save entry</button>
   </div>
 </div>
@@ -356,17 +375,18 @@ const BASELINE_START_KEY = "mealLog_baselineStart";
 const MEALS = ["Breakfast","Lunch","Dinner","Snack"];
 const WORKOUT_REL = [["none","None"],["pre","Pre-workout"],["post","Post-workout"]];
 const SETTINGS = ["Home","Eating out","Social","Desk / on the go"];
-const DB_NAME = "mealLogDB", STORE = "entries", META = "meta";
+const DB_NAME = "mealLogDB", STORE = "entries", META = "meta", TPL = "templates";
 
 /* ============ IndexedDB ============ */
 let db;
 function openDB(){
   return new Promise((res,rej)=>{
-    const r = indexedDB.open(DB_NAME,1);
+    const r = indexedDB.open(DB_NAME,2);
     r.onupgradeneeded = e=>{
       const d = e.target.result;
       if(!d.objectStoreNames.contains(STORE)) d.createObjectStore(STORE,{keyPath:"id"});
       if(!d.objectStoreNames.contains(META)) d.createObjectStore(META,{keyPath:"key"});
+      if(!d.objectStoreNames.contains(TPL)) d.createObjectStore(TPL,{keyPath:"id"});
     };
     r.onsuccess = e=>{db=e.target.result;res();};
     r.onerror = e=>rej(e.target.error);
@@ -379,6 +399,9 @@ function allEntries(){return new Promise((res,rej)=>{const r=tx(STORE,"readonly"
 function clearAll(){return new Promise((res,rej)=>{const r=tx(STORE,"readwrite").clear();r.onsuccess=res;r.onerror=()=>rej(r.error);});}
 function getMeta(k){return new Promise((res)=>{const r=tx(META,"readonly").get(k);r.onsuccess=()=>res(r.result?r.result.value:null);r.onerror=()=>res(null);});}
 function setMeta(k,v){return new Promise((res,rej)=>{const r=tx(META,"readwrite").put({key:k,value:v});r.onsuccess=res;r.onerror=()=>rej(r.error);});}
+function putTpl(o){return new Promise((res,rej)=>{const r=tx(TPL,"readwrite").put(o);r.onsuccess=res;r.onerror=()=>rej(r.error);});}
+function allTpl(){return new Promise((res,rej)=>{const r=tx(TPL,"readonly").getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error);});}
+function delTpl(id){return new Promise((res,rej)=>{const r=tx(TPL,"readwrite").delete(id);r.onsuccess=res;r.onerror=()=>rej(r.error);});}
 
 /* ============ Helpers ============ */
 const $ = id=>document.getElementById(id);
@@ -412,6 +435,8 @@ function compressImage(file){
 
 /* ============ State ============ */
 let entries=[];
+let templates=[];
+let saveAsTpl=false;
 let draft={photo:null,meal:null,workout:"none",setting:null,hunger:0,time:null};
 
 /* ============ Render: header + timeline ============ */
@@ -491,6 +516,7 @@ function entryCard(e){
       ${meta.length?`<div class="entry-meta">${meta.join("")}</div>`:""}
       ${e.notes?`<div class="entry-meta" style="font-style:italic">"${escapeHtml(e.notes)}"</div>`:""}
     </div>
+    <button class="entry-repeat" data-rep="${e.id}">⟳</button>
     <button class="entry-del" data-id="${e.id}">✕</button>`;
   return div;
 }
@@ -567,13 +593,59 @@ function setNow(){
   $("timeInput").value=pad(n.getHours())+":"+pad(n.getMinutes());
   draft.time=n;
 }
-function openSheet(){
+function resetPhotoZone(){
+  $("photoZone").innerHTML=`<span class="icon">📷</span><span class="hint">Tap to take or choose a photo</span><input type="file" id="photoInput" accept="image/*" style="display:none">`;
+  $("photoInput").onchange=handlePhoto;
+}
+function showPhotoZone(data){
+  $("photoZone").innerHTML=`<img src="${data}" alt=""><button class="photo-clear" id="photoClear">✕</button>`;
+  $("photoClear").onclick=(ev)=>{ev.preventDefault();ev.stopPropagation();draft.photo=null;resetPhotoZone();validate();};
+}
+function setSaveTpl(on){
+  saveAsTpl=on;
+  const btn=$("saveTplToggle");
+  btn.classList.toggle("on",on);
+  btn.textContent=(on?"★":"☆")+" Save as a quick meal for next time";
+  $("tplName").style.display=on?"block":"none";
+}
+function renderQuickRow(){
+  const row=$("quickRow");row.innerHTML="";
+  if(!templates.length){$("quickField").style.display="none";return;}
+  $("quickField").style.display="block";
+  templates.forEach(t=>{
+    const b=document.createElement("button");b.className="selchip";b.textContent=t.name;
+    b.onclick=()=>fillFromTemplate(t);
+    row.appendChild(b);
+  });
+}
+function fillFromTemplate(t){
+  draft.meal=t.meal||null;
+  draft.workout=t.workout||"none";
+  draft.setting=t.setting||null;
+  draft.photo=t.photo||null;
+  $("descInput").value=t.description||"";
+  if(t.photo)showPhotoZone(t.photo);else resetPhotoZone();
+  syncChips();
+  toast("Filled from "+t.name);
+}
+function openSheet(prefill){
   draft={photo:null,meal:null,workout:"none",setting:null,hunger:0,time:null};
   $("descInput").value="";$("notesInput").value="";
   $("hungerInput").value=0;$("hungerVal").textContent="—";
-  $("photoZone").innerHTML=`<span class="icon">📷</span><span class="hint">Tap to take or choose a photo</span><input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none">`;
-  $("photoInput").onchange=handlePhoto;
+  resetPhotoZone();
+  setSaveTpl(false);$("tplName").value="";
+  renderQuickRow();
   setNow();syncChips();
+  $("sheetTitle").textContent = prefill ? "Repeat meal" : "Log a meal";
+  if(prefill){
+    draft.meal=prefill.meal||null;
+    draft.workout=prefill.workout||"none";
+    draft.setting=prefill.setting||null;
+    draft.photo=prefill.photo||null;
+    $("descInput").value=prefill.description||"";
+    if(prefill.photo)showPhotoZone(prefill.photo);
+    syncChips();
+  }
   $("scrim").classList.add("open");$("sheet").classList.add("open");
   document.body.style.overflow="hidden";
 }
@@ -585,15 +657,7 @@ async function handlePhoto(e){
   const file=e.target.files[0];if(!file)return;
   toast("Processing photo…");
   const data=await compressImage(file);
-  if(data){
-    draft.photo=data;
-    $("photoZone").innerHTML=`<img src="${data}" alt=""><button class="photo-clear" id="photoClear">✕</button>`;
-    $("photoClear").onclick=(ev)=>{ev.preventDefault();ev.stopPropagation();
-      draft.photo=null;
-      $("photoZone").innerHTML=`<span class="icon">📷</span><span class="hint">Tap to take or choose a photo</span><input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none">`;
-      $("photoInput").onchange=handlePhoto;validate();
-    };
-  }
+  if(data){draft.photo=data;showPhotoZone(data);}
   validate();
 }
 async function saveEntry(){
@@ -613,14 +677,34 @@ async function saveEntry(){
   };
   await putEntry(entry);
   entries.push(entry);
+  if(saveAsTpl){
+    const name=$("tplName").value.trim() || draft.meal || "Saved meal";
+    const tpl={id:"tpl-"+Date.now()+"-"+Math.random().toString(36).slice(2,6),
+      name,description:entry.description,meal:entry.meal,
+      workout:entry.workout,setting:entry.setting,photo:entry.photo};
+    await putTpl(tpl);
+    templates.push(tpl);
+    renderTplManage();
+  }
   closeSheet();
   refresh();
-  toast("Logged ✓");
+  toast(saveAsTpl?"Logged + saved ✓":"Logged ✓");
+}
+function renderTplManage(){
+  const list=$("tplManageList");if(!list)return;list.innerHTML="";
+  if(!templates.length){list.innerHTML=`<p style="color:var(--muted2);font-size:13px;margin:0">None yet. Tick "Save as a quick meal" when logging one.</p>`;return;}
+  templates.forEach(t=>{
+    const row=document.createElement("div");
+    row.style.cssText="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)";
+    row.innerHTML=`<span style="font-size:14px">${escapeHtml(t.name)}</span>
+      <button class="data-btn warn" data-tpl="${t.id}" style="width:auto;padding:7px 13px;font-size:13px">Remove</button>`;
+    list.appendChild(row);
+  });
 }
 
 /* ============ Export / import ============ */
 async function exportJson(){
-  const data={version:1,exported:new Date().toISOString(),baselineStart:localStorage.getItem(BASELINE_START_KEY),entries};
+  const data={version:2,exported:new Date().toISOString(),baselineStart:localStorage.getItem(BASELINE_START_KEY),entries,templates};
   download(JSON.stringify(data),"meallog-backup-"+dayKey(new Date())+".json","application/json");
   toast("Backup exported");
 }
@@ -671,6 +755,12 @@ function importBackup(file){
       const existing=new Set(entries.map(e=>e.id));
       for(const e of data.entries){if(!existing.has(e.id)){await putEntry(e);added++;}}
       if(data.baselineStart)localStorage.setItem(BASELINE_START_KEY,data.baselineStart);
+      if(Array.isArray(data.templates)){
+        const existTpl=new Set(templates.map(t=>t.id));
+        for(const t of data.templates){if(!existTpl.has(t.id)){await putTpl(t);}}
+        templates=await allTpl();
+        renderQuickRow();renderTplManage();
+      }
       entries=await allEntries();
       refresh();
       toast(added+" entries restored");
@@ -705,13 +795,15 @@ function refresh(){renderHeader();renderTimeline();renderFeed();}
 async function init(){
   await openDB();
   entries=await allEntries();
+  templates=await allTpl();
   buildChips();
-  renderHeader();renderTimeline();renderFeed();
+  renderHeader();renderTimeline();renderFeed();renderTplManage();
 
-  $("openSheet").onclick=openSheet;
+  $("openSheet").onclick=()=>openSheet();
+  $("saveTplToggle").onclick=()=>setSaveTpl(!saveAsTpl);
   $("closeSheet").onclick=closeSheet;
   $("scrim").onclick=closeSheet;
-  $("photoZone").onclick=(e)=>{if(e.target.id!=="photoClear")$("photoInput").click();};
+  $("photoZone").onclick=(e)=>{const inp=$("photoInput");if(e.target.id!=="photoClear"&&inp)inp.click();};
   $("photoInput").onchange=handlePhoto;
   $("descInput").oninput=validate;
   $("nowBtn").onclick=setNow;
@@ -733,7 +825,7 @@ async function init(){
     b.onclick=()=>showScreen(b.dataset.screen);
   });
 
-  // feed delete (event delegation)
+  // feed delete + repeat + template removal (event delegation)
   document.body.addEventListener("click",async e=>{
     const del=e.target.closest(".entry-del");
     if(del){
@@ -742,6 +834,20 @@ async function init(){
         entries=entries.filter(x=>x.id!==del.dataset.id);
         refresh();renderHistory();
       }
+      return;
+    }
+    const rep=e.target.closest(".entry-repeat");
+    if(rep){
+      const src=entries.find(x=>x.id===rep.dataset.rep);
+      if(src)openSheet(src);
+      return;
+    }
+    const tplDel=e.target.closest("[data-tpl]");
+    if(tplDel){
+      await delTpl(tplDel.dataset.tpl);
+      templates=templates.filter(x=>x.id!==tplDel.dataset.tpl);
+      renderTplManage();
+      toast("Quick meal removed");
     }
   });
 
