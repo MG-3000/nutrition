@@ -187,6 +187,31 @@
   .stat .num{font-family:var(--display);font-size:24px;font-weight:700;color:var(--amber)}
   .stat .lbl{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);margin-top:3px}
 
+  /* daily macro totals */
+  .totals-wrap{padding:0 20px 6px}
+  .totals{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;background:var(--surface);
+    border:1px solid var(--line);border-radius:12px;padding:13px 10px}
+  .tot{text-align:center}
+  .tot-num{font-family:var(--display);font-size:20px;font-weight:700;line-height:1.1;color:var(--text)}
+  .tot-num.amber{color:var(--amber)} .tot-num.teal{color:var(--teal)}
+  .tot-lbl{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);margin-top:4px}
+  .totals-note{font-family:var(--mono);font-size:10.5px;color:var(--muted2);text-align:center;margin-top:7px}
+
+  /* macro inputs */
+  .macro-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .macro-cell{display:flex;flex-direction:column;gap:5px}
+  .macro-cell input{width:100%;background:var(--surface2);border:1px solid var(--line);border-radius:10px;
+    padding:11px 6px;color:var(--text);text-align:center;font-family:var(--mono);font-size:15px;-moz-appearance:textfield}
+  .macro-cell input::-webkit-outer-spin-button,.macro-cell input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  .macro-cell input:focus{outline:none;border-color:var(--amber-line)}
+  .macro-cell span{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:0.04em;color:var(--muted);text-align:center}
+
+  /* macro line on entry cards */
+  .entry-macros{margin-top:7px;display:flex;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:12px}
+  .entry-macros .mk{color:var(--text)} .entry-macros .mk b{color:var(--amber);font-weight:700}
+  .entry-macros .mk.p b{color:var(--teal)}
+  .entry-macros .mlabel{color:var(--muted2)}
+
   /* ---------- Tab nav ---------- */
   .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30}
 
@@ -229,6 +254,19 @@
         <button class="tl-set" id="setWorkoutBtn">+ Workout time</button>
       </div>
       <div class="timeline" id="timeline"></div>
+    </div>
+
+    <div class="totals-wrap">
+      <div class="tl-head" style="margin-bottom:9px;padding:0">
+        <div class="tl-title">Today's macros · running total</div>
+      </div>
+      <div class="totals">
+        <div class="tot"><div class="tot-num amber" id="totKcal">0</div><div class="tot-lbl">kcal</div></div>
+        <div class="tot"><div class="tot-num teal" id="totProtein">0g</div><div class="tot-lbl">protein</div></div>
+        <div class="tot"><div class="tot-num" id="totCarbs">0g</div><div class="tot-lbl">carbs</div></div>
+        <div class="tot"><div class="tot-num" id="totFat">0g</div><div class="tot-lbl">fat</div></div>
+      </div>
+      <div class="totals-note" id="totalsNote"></div>
     </div>
 
     <div class="feed">
@@ -316,6 +354,16 @@
     <div class="field">
       <label class="field-label">What did you eat?</label>
       <textarea id="descInput" placeholder="e.g. Grilled chicken thigh, white rice ~1.5 cups, side of broccoli, olive oil"></textarea>
+    </div>
+
+    <div class="field">
+      <label class="field-label">Macros (optional · leave blank for review)</label>
+      <div class="macro-grid">
+        <div class="macro-cell"><input type="number" min="0" inputmode="numeric" id="kcalInput" placeholder="—"><span>kcal</span></div>
+        <div class="macro-cell"><input type="number" min="0" inputmode="numeric" id="proteinInput" placeholder="—"><span>protein g</span></div>
+        <div class="macro-cell"><input type="number" min="0" inputmode="numeric" id="carbsInput" placeholder="—"><span>carbs g</span></div>
+        <div class="macro-cell"><input type="number" min="0" inputmode="numeric" id="fatInput" placeholder="—"><span>fat g</span></div>
+      </div>
     </div>
 
     <div class="field">
@@ -504,6 +552,13 @@ function entryCard(e){
   const meta=[];
   if(e.hunger>0) meta.push(`<span>Hunger <span class="mono">${e.hunger}/10</span></span>`);
   if(e.setting) meta.push(`<span>${e.setting}</span>`);
+  const hasMacros = [e.kcal,e.protein,e.carbs,e.fat].some(v=>v!=null&&v!=="");
+  const macroLine = hasMacros ? `<div class="entry-macros">
+      <span class="mk"><b>${num(e.kcal)}</b> <span class="mlabel">kcal</span></span>
+      <span class="mk p"><b>${num(e.protein)}</b> <span class="mlabel">P</span></span>
+      <span class="mk"><b>${num(e.carbs)}</b> <span class="mlabel">C</span></span>
+      <span class="mk"><b>${num(e.fat)}</b> <span class="mlabel">F</span></span>
+    </div>` : "";
   div.innerHTML=`
     ${thumb}
     <div class="entry-body">
@@ -513,6 +568,7 @@ function entryCard(e){
         ${wkChip}
       </div>
       <div class="entry-desc">${e.description?escapeHtml(e.description):"<span style='color:var(--muted2)'>No description</span>"}</div>
+      ${macroLine}
       ${meta.length?`<div class="entry-meta">${meta.join("")}</div>`:""}
       ${e.notes?`<div class="entry-meta" style="font-style:italic">"${escapeHtml(e.notes)}"</div>`:""}
     </div>
@@ -520,6 +576,7 @@ function entryCard(e){
     <button class="entry-del" data-id="${e.id}">✕</button>`;
   return div;
 }
+function num(v){return (v==null||v==="")?"—":v;}
 function escapeHtml(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 
 function renderFeed(){
@@ -533,6 +590,24 @@ function renderFeed(){
     return;
   }
   today.forEach(e=>list.appendChild(entryCard(e)));
+}
+
+function renderDailyTotals(){
+  const today=entries.filter(e=>dayKey(new Date(e.timestamp))===dayKey(new Date()));
+  let kcal=0,p=0,c=0,f=0,withMacros=0;
+  today.forEach(e=>{
+    const has=[e.kcal,e.protein,e.carbs,e.fat].some(v=>v!=null&&v!=="");
+    if(has)withMacros++;
+    kcal+=Number(e.kcal)||0; p+=Number(e.protein)||0; c+=Number(e.carbs)||0; f+=Number(e.fat)||0;
+  });
+  $("totKcal").textContent=Math.round(kcal);
+  $("totProtein").textContent=Math.round(p)+"g";
+  $("totCarbs").textContent=Math.round(c)+"g";
+  $("totFat").textContent=Math.round(f)+"g";
+  const note=$("totalsNote");
+  if(today.length===0) note.textContent="Log a meal to start the count";
+  else if(withMacros===today.length) note.textContent="All "+today.length+" entries have macros";
+  else note.textContent=withMacros+" of "+today.length+" entries have macros · rest estimated at review";
 }
 
 /* ============ Render: history ============ */
@@ -618,12 +693,20 @@ function renderQuickRow(){
     row.appendChild(b);
   });
 }
+function getMacro(id){const v=$(id).value.trim();return v===""?null:Number(v);}
+function setMacroInputs(o){
+  $("kcalInput").value   =(o&&o.kcal!=null)?o.kcal:"";
+  $("proteinInput").value=(o&&o.protein!=null)?o.protein:"";
+  $("carbsInput").value  =(o&&o.carbs!=null)?o.carbs:"";
+  $("fatInput").value    =(o&&o.fat!=null)?o.fat:"";
+}
 function fillFromTemplate(t){
   draft.meal=t.meal||null;
   draft.workout=t.workout||"none";
   draft.setting=t.setting||null;
   draft.photo=t.photo||null;
   $("descInput").value=t.description||"";
+  setMacroInputs(t);
   if(t.photo)showPhotoZone(t.photo);else resetPhotoZone();
   syncChips();
   toast("Filled from "+t.name);
@@ -632,6 +715,7 @@ function openSheet(prefill){
   draft={photo:null,meal:null,workout:"none",setting:null,hunger:0,time:null};
   $("descInput").value="";$("notesInput").value="";
   $("hungerInput").value=0;$("hungerVal").textContent="—";
+  setMacroInputs(null);
   resetPhotoZone();
   setSaveTpl(false);$("tplName").value="";
   renderQuickRow();
@@ -643,6 +727,7 @@ function openSheet(prefill){
     draft.setting=prefill.setting||null;
     draft.photo=prefill.photo||null;
     $("descInput").value=prefill.description||"";
+    setMacroInputs(prefill);
     if(prefill.photo)showPhotoZone(prefill.photo);
     syncChips();
   }
@@ -673,6 +758,10 @@ async function saveEntry(){
     description:$("descInput").value.trim(),
     notes:$("notesInput").value.trim(),
     photo:draft.photo,
+    kcal:getMacro("kcalInput"),
+    protein:getMacro("proteinInput"),
+    carbs:getMacro("carbsInput"),
+    fat:getMacro("fatInput"),
     session:sessionFor(t)
   };
   await putEntry(entry);
@@ -681,7 +770,8 @@ async function saveEntry(){
     const name=$("tplName").value.trim() || draft.meal || "Saved meal";
     const tpl={id:"tpl-"+Date.now()+"-"+Math.random().toString(36).slice(2,6),
       name,description:entry.description,meal:entry.meal,
-      workout:entry.workout,setting:entry.setting,photo:entry.photo};
+      workout:entry.workout,setting:entry.setting,photo:entry.photo,
+      kcal:entry.kcal,protein:entry.protein,carbs:entry.carbs,fat:entry.fat};
     await putTpl(tpl);
     templates.push(tpl);
     renderTplManage();
@@ -719,12 +809,21 @@ async function exportText(){
     const d=new Date(k+"T12:00:00");
     out+=fmtDate(d)+"  ["+sessionFor(d)+" day]\n";
     out+="-".repeat(46)+"\n";
+    let dk=0,dp=0,dc=0,df=0,mac=0;
     days[k].sort((a,b)=>a.timestamp-b.timestamp).forEach(e=>{
       out+=fmtTime(e.timestamp).padEnd(9)+" ";
       out+=(e.meal||"—");
       if(e.workout&&e.workout!=="none") out+=" ("+e.workout+"-workout)";
       out+="\n";
       if(e.description) out+="          "+e.description+"\n";
+      const hasM=[e.kcal,e.protein,e.carbs,e.fat].some(v=>v!=null&&v!=="");
+      if(hasM){
+        out+="          macros: "+num(e.kcal)+" kcal · P "+num(e.protein)+"g · C "+num(e.carbs)+"g · F "+num(e.fat)+"g\n";
+        mac++;
+      } else {
+        out+="          macros: (not entered — estimate from description"+(e.photo?"/photo":"")+")\n";
+      }
+      dk+=Number(e.kcal)||0;dp+=Number(e.protein)||0;dc+=Number(e.carbs)||0;df+=Number(e.fat)||0;
       const bits=[];
       if(e.hunger>0)bits.push("hunger "+e.hunger+"/10");
       if(e.setting)bits.push(e.setting.toLowerCase());
@@ -732,6 +831,8 @@ async function exportText(){
       if(e.notes)out+="          note: "+e.notes+"\n";
       out+="\n";
     });
+    out+="  DAY TOTAL (entered): "+Math.round(dk)+" kcal · P "+Math.round(dp)+"g · C "+Math.round(dc)+"g · F "+Math.round(df)+"g";
+    out+="  ["+mac+"/"+days[k].length+" entries had macros]\n";
     out+="\n";
   });
   out+="("+entries.length+" entries, "+entries.filter(e=>e.photo).length+" photos stored in app)\n";
@@ -789,7 +890,7 @@ async function setWorkout(){
 }
 
 /* ============ Refresh ============ */
-function refresh(){renderHeader();renderTimeline();renderFeed();}
+function refresh(){renderHeader();renderTimeline();renderDailyTotals();renderFeed();}
 
 /* ============ Init ============ */
 async function init(){
@@ -797,7 +898,7 @@ async function init(){
   entries=await allEntries();
   templates=await allTpl();
   buildChips();
-  renderHeader();renderTimeline();renderFeed();renderTplManage();
+  renderHeader();renderTimeline();renderDailyTotals();renderFeed();renderTplManage();
 
   $("openSheet").onclick=()=>openSheet();
   $("saveTplToggle").onclick=()=>setSaveTpl(!saveAsTpl);
