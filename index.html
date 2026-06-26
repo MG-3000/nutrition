@@ -212,6 +212,31 @@
   .entry-macros .mk.p b{color:var(--teal)}
   .entry-macros .mlabel{color:var(--muted2)}
 
+  /* food lookup */
+  .lookup-bar{display:flex;gap:8px}
+  .lookup-bar input{flex:1;background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:11px 12px;color:var(--text)}
+  .lookup-bar input:focus{outline:none;border-color:var(--amber-line)}
+  .lookup-btn{padding:0 16px;border-radius:10px;background:var(--surface3);border:1px solid var(--line-strong);
+    font-family:var(--display);font-weight:600;font-size:14px;color:var(--text)}
+  .lookup-btn:active{background:var(--surface2)}
+  .lookup-results{margin-top:10px;display:flex;flex-direction:column;gap:7px;max-height:320px;overflow-y:auto}
+  .lk-row{padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface2)}
+  .lk-row.sel{border-color:var(--amber-line);background:var(--amber-dim)}
+  .lk-name{font-size:13.5px;font-weight:500;line-height:1.32}
+  .lk-meta{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .lk-badge{font-size:9px;text-transform:uppercase;letter-spacing:0.04em;padding:1px 5px;border-radius:4px;border:1px solid var(--line-strong);color:var(--muted)}
+  .lk-badge.usda{color:var(--teal);border-color:var(--teal-line)}
+  .lk-badge.off{color:var(--amber);border-color:var(--amber-line)}
+  .lk-add{margin-top:8px;display:flex;gap:8px;align-items:center;padding:11px;border:1px solid var(--amber-line);border-radius:10px;background:var(--surface)}
+  .lk-add input{width:64px;text-align:center;background:var(--surface2);border:1px solid var(--line);border-radius:9px;padding:9px 6px;color:var(--text);font-family:var(--mono);font-size:15px;-moz-appearance:textfield}
+  .lk-add input::-webkit-outer-spin-button,.lk-add input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  .lk-unit{min-width:38px;padding:9px 8px;border-radius:9px;background:var(--surface2);border:1px solid var(--line-strong);
+    font-family:var(--mono);font-size:13px;font-weight:700;color:var(--amber);text-transform:lowercase}
+  .lk-unit:active{background:var(--surface3)}
+  .lk-add .prev{flex:1;font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.3}
+  .lk-add button{padding:9px 15px;border-radius:9px;background:var(--amber);color:#1A1206;font-family:var(--display);font-weight:700;font-size:13px}
+  .lk-status{font-size:12.5px;color:var(--muted);padding:7px 2px;line-height:1.4}
+
   /* ---------- Tab nav ---------- */
   .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30}
 
@@ -298,6 +323,13 @@
         <button class="data-btn" id="exportJson">Export full backup (JSON)</button>
       </div>
       <div class="data-card">
+        <h3>Food database</h3>
+        <p>Food lookup searches Open Food Facts (no setup) and USDA. USDA works now on a shared demo key with low limits — paste your own free key for higher limits and better whole-food data. It's stored only on this device, never uploaded.</p>
+        <input type="text" id="usdaKeyInput" placeholder="USDA API key (optional)">
+        <button class="data-btn" id="saveUsdaKey" style="margin-top:9px">Save key</button>
+        <p style="margin-top:10px;margin-bottom:0">Free key: fdc.nal.usda.gov/api-key-signup</p>
+      </div>
+      <div class="data-card">
         <h3>Saved quick meals</h3>
         <p>Meals you've saved for one-tap logging. Remove any you no longer use.</p>
         <div id="tplManageList"></div>
@@ -354,6 +386,15 @@
     <div class="field">
       <label class="field-label">What did you eat?</label>
       <textarea id="descInput" placeholder="e.g. Grilled chicken thigh, white rice ~1.5 cups, side of broccoli, olive oil"></textarea>
+    </div>
+
+    <div class="field">
+      <label class="field-label">Look up a food · adds to macros below</label>
+      <div class="lookup-bar">
+        <input type="text" id="lookupInput" placeholder="e.g. chicken breast, banana, oats">
+        <button class="lookup-btn" id="lookupBtn">Search</button>
+      </div>
+      <div id="lookupResults" class="lookup-results"></div>
     </div>
 
     <div class="field">
@@ -424,6 +465,7 @@ const MEALS = ["Breakfast","Lunch","Dinner","Snack"];
 const WORKOUT_REL = [["none","None"],["pre","Pre-workout"],["post","Post-workout"]];
 const SETTINGS = ["Home","Eating out","Social","Desk / on the go"];
 const DB_NAME = "mealLogDB", STORE = "entries", META = "meta", TPL = "templates";
+const USDA_KEY_LS = "mealLog_usdaKey";
 
 /* ============ IndexedDB ============ */
 let db;
@@ -462,22 +504,52 @@ function toast(msg){const t=$("toast");t.textContent=msg;t.classList.add("show")
 
 /* Image compression */
 function compressImage(file){
-  return new Promise((res)=>{
-    const img=new Image();
-    const url=URL.createObjectURL(file);
-    img.onload=()=>{
-      URL.revokeObjectURL(url);
-      const max=900;
-      let{width:w,height:h}=img;
-      if(w>h&&w>max){h=h*max/w;w=max;}
-      else if(h>max){w=w*max/h;h=max;}
-      const c=document.createElement("canvas");
-      c.width=w;c.height=h;
-      c.getContext("2d").drawImage(img,0,0,w,h);
-      res(c.toDataURL("image/jpeg",0.7));
+  return new Promise((resolve)=>{
+    let settled=false;
+    const done=v=>{if(!settled){settled=true;clearTimeout(timer);resolve(v);}};
+    const timer=setTimeout(()=>done(null),20000); // never hang forever
+
+    // last resort: store the original file unmodified so the photo still saves
+    const fallbackRaw=()=>{
+      try{
+        const fr=new FileReader();
+        fr.onload=()=>done(fr.result);
+        fr.onerror=()=>done(null);
+        fr.readAsDataURL(file);
+      }catch(_){done(null);}
     };
-    img.onerror=()=>res(null);
-    img.src=url;
+
+    const draw=(src,cleanup)=>{
+      try{
+        const max=900;
+        let w=src.naturalWidth||src.width, h=src.naturalHeight||src.height;
+        if(!w||!h){if(cleanup)cleanup();return fallbackRaw();}
+        if(w>h&&w>max){h=Math.round(h*max/w);w=max;}
+        else if(h>max){w=Math.round(w*max/h);h=max;}
+        const c=document.createElement("canvas");c.width=w;c.height=h;
+        c.getContext("2d").drawImage(src,0,0,w,h);
+        const data=c.toDataURL("image/jpeg",0.7);
+        if(cleanup)cleanup();
+        if(data&&data.length>100)done(data);else fallbackRaw();
+      }catch(_){if(cleanup)cleanup();fallbackRaw();}
+    };
+
+    const viaImg=()=>{
+      try{
+        const url=URL.createObjectURL(file);
+        const img=new Image();
+        img.onload=()=>draw(img,()=>URL.revokeObjectURL(url));
+        img.onerror=()=>{URL.revokeObjectURL(url);fallbackRaw();};
+        img.src=url;
+      }catch(_){fallbackRaw();}
+    };
+
+    // createImageBitmap is memory-efficient and decodes HEIC + applies orientation
+    if(window.createImageBitmap){
+      createImageBitmap(file).then(bmp=>{
+        draw(bmp,()=>{if(bmp.close)bmp.close();});
+      }).catch(viaImg);
+    } else { viaImg(); }
   });
 }
 
@@ -578,6 +650,131 @@ function entryCard(e){
 }
 function num(v){return (v==null||v==="")?"—":v;}
 function escapeHtml(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+/* ============ Food lookup (Open Food Facts + USDA) ============ */
+let lookupSel=null;
+let lkUnit="oz";
+const OZ_G=28.3495;
+function lkDefault(){return lkUnit==="oz"?4:100;}
+function lkGrams(){const a=Number($("lkAmt").value)||0;return lkUnit==="oz"?a*OZ_G:a;}
+function getUsdaKey(){return (localStorage.getItem(USDA_KEY_LS)||"").trim() || "DEMO_KEY";}
+function r1(v){return (v==null||isNaN(v))?null:Math.round(v*10)/10;}
+function nz(v){return v==null?"—":v;}
+
+async function searchOFF(q){
+  const url="https://world.openfoodfacts.org/cgi/search.pl?search_terms="+encodeURIComponent(q)+
+    "&search_simple=1&action=process&json=1&page_size=20&fields=product_name,brands,nutriments";
+  const res=await fetch(url);
+  if(!res.ok)throw new Error("off "+res.status);
+  const d=await res.json();
+  const out=[];
+  (d.products||[]).forEach(p=>{
+    const n=p.nutriments||{};
+    const kcal=n["energy-kcal_100g"];
+    if(kcal==null||!p.product_name)return;
+    out.push({source:"off",
+      name:(p.brands?String(p.brands).split(",")[0]+" — ":"")+p.product_name,
+      kcal:Math.round(kcal),protein:r1(n.proteins_100g),carbs:r1(n.carbohydrates_100g),fat:r1(n.fat_100g)});
+  });
+  return out.slice(0,12);
+}
+function usdaNut(f,num){
+  const n=(f.foodNutrients||[]).find(x=>String(x.nutrientNumber)===num);
+  return (n&&n.value!=null)?n.value:null;
+}
+async function searchUSDA(q){
+  const url="https://api.nal.usda.gov/fdc/v1/foods/search?api_key="+encodeURIComponent(getUsdaKey())+
+    "&query="+encodeURIComponent(q)+"&pageSize=10";
+  const res=await fetch(url);
+  if(!res.ok)throw new Error("usda "+res.status);
+  const d=await res.json();
+  const out=[];
+  (d.foods||[]).forEach(f=>{
+    const kcal=usdaNut(f,"208"); if(kcal==null)return;
+    out.push({source:"usda",
+      name:f.description+(f.brandOwner?(" ("+f.brandOwner+")"):""),
+      kcal:Math.round(kcal),protein:r1(usdaNut(f,"203")),carbs:r1(usdaNut(f,"205")),fat:r1(usdaNut(f,"204"))});
+  });
+  return out;
+}
+async function runLookup(){
+  const q=$("lookupInput").value.trim();
+  if(!q)return;
+  lookupSel=null;
+  const box=$("lookupResults");
+  box.innerHTML='<div class="lk-status">Searching USDA + Open Food Facts…</div>';
+  const [usdaR,offR]=await Promise.allSettled([searchUSDA(q),searchOFF(q)]);
+  let list=[],notes=[];
+  if(usdaR.status==="fulfilled")list=list.concat(usdaR.value); else notes.push("USDA unavailable");
+  if(offR.status==="fulfilled")list=list.concat(offR.value); else notes.push("Open Food Facts unavailable");
+  if(list.length===0){
+    box.innerHTML='<div class="lk-status">No matches'+(notes.length?" · "+notes.join(", "):"")+
+      '. Try simpler words, or just type the macros by hand.</div>';
+    return;
+  }
+  renderLookup(list,notes);
+}
+function renderLookup(list,notes){
+  const box=$("lookupResults");box.innerHTML="";
+  list.forEach((it,i)=>{
+    const row=document.createElement("div");row.className="lk-row";row.dataset.i=i;
+    row.innerHTML=`<div class="lk-name">${escapeHtml(it.name)}</div>
+      <div class="lk-meta"><span class="lk-badge ${it.source}">${it.source==="usda"?"USDA":"OFF"}</span>
+      <span>${it.kcal} kcal</span><span>P ${nz(it.protein)}</span><span>C ${nz(it.carbs)}</span><span>F ${nz(it.fat)}</span><span>per 100g</span></div>`;
+    row.onclick=()=>selectLookup(list,i);
+    box.appendChild(row);
+  });
+  if(notes.length){const s=document.createElement("div");s.className="lk-status";s.textContent=notes.join(" · ");box.appendChild(s);}
+}
+function scaleMacro(per100,g){return per100==null?null:Math.round(per100*g/100*10)/10;}
+function selectLookup(list,i){
+  lookupSel=list[i];
+  document.querySelectorAll(".lk-row").forEach(r=>r.classList.toggle("sel",String(r.dataset.i)===String(i)));
+  const old=$("lkAdd"); if(old)old.remove();
+  const panel=document.createElement("div");panel.className="lk-add";panel.id="lkAdd";
+  panel.innerHTML=`<input type="number" min="0" inputmode="decimal" id="lkAmt" value="${lkDefault()}">
+    <button class="lk-unit" id="lkUnitBtn">${lkUnit}</button>
+    <span class="prev" id="lkPrev"></span><button id="lkAddBtn">Add</button>`;
+  document.querySelector('.lk-row[data-i="'+i+'"]').after(panel);
+  $("lkAmt").oninput=updateLkPrev;
+  $("lkUnitBtn").onclick=toggleLkUnit;
+  $("lkAddBtn").onclick=addLookup;
+  updateLkPrev();
+}
+function toggleLkUnit(){
+  const a=Number($("lkAmt").value)||0;
+  if(lkUnit==="oz"){lkUnit="g";$("lkAmt").value=Math.round(a*OZ_G);}
+  else{lkUnit="oz";$("lkAmt").value=Math.round(a/OZ_G*10)/10;}
+  $("lkUnitBtn").textContent=lkUnit;
+  updateLkPrev();
+}
+function updateLkPrev(){
+  if(!lookupSel)return;
+  const g=lkGrams();
+  $("lkPrev").textContent="→ "+Math.round((lookupSel.kcal||0)*g/100)+" kcal · P "+
+    nz(scaleMacro(lookupSel.protein,g))+" · C "+nz(scaleMacro(lookupSel.carbs,g))+" · F "+nz(scaleMacro(lookupSel.fat,g));
+}
+function addToMacro(id,val){
+  if(val==null)return;
+  const cur=$(id).value.trim()===""?0:Number($(id).value);
+  const sum=cur+Number(val);
+  $(id).value = (id==="kcalInput")?Math.round(sum):Math.round(sum*10)/10;
+}
+function addLookup(){
+  if(!lookupSel)return;
+  const amt=Number($("lkAmt").value)||0; if(amt<=0)return;
+  const g=lkGrams();
+  const k=Math.round((lookupSel.kcal||0)*g/100);
+  addToMacro("kcalInput",k);
+  addToMacro("proteinInput",scaleMacro(lookupSel.protein,g));
+  addToMacro("carbsInput",scaleMacro(lookupSel.carbs,g));
+  addToMacro("fatInput",scaleMacro(lookupSel.fat,g));
+  const nm=lookupSel.name.length>42?lookupSel.name.slice(0,42)+"…":lookupSel.name;
+  const cur=$("descInput").value.trim();
+  $("descInput").value=(cur?cur+", ":"")+nm+" ("+amt+lkUnit+")";
+  toast("Added "+k+" kcal");
+  validate();
+}
 
 function renderFeed(){
   const list=$("feedList");list.innerHTML="";
@@ -716,6 +913,7 @@ function openSheet(prefill){
   $("descInput").value="";$("notesInput").value="";
   $("hungerInput").value=0;$("hungerVal").textContent="—";
   setMacroInputs(null);
+  $("lookupInput").value="";$("lookupResults").innerHTML="";lookupSel=null;
   resetPhotoZone();
   setSaveTpl(false);$("tplName").value="";
   renderQuickRow();
@@ -741,11 +939,16 @@ function closeSheet(){
 async function handlePhoto(e){
   const file=e.target.files[0];if(!file)return;
   toast("Processing photo…");
-  const data=await compressImage(file);
-  if(data){draft.photo=data;showPhotoZone(data);}
+  let data=null;
+  try{ data=await compressImage(file); }catch(_){}
+  if(data){draft.photo=data;showPhotoZone(data);toast("Photo added ✓");}
+  else{toast("Couldn't read that photo — try another");}
   validate();
 }
 async function saveEntry(){
+  const btn=$("saveEntry");
+  if(btn.disabled)return;
+  btn.disabled=true;
   const [hh,mm]=($("timeInput").value||"00:00").split(":").map(Number);
   const t=new Date();t.setHours(hh,mm,0,0);
   const entry={
@@ -764,21 +967,28 @@ async function saveEntry(){
     fat:getMacro("fatInput"),
     session:sessionFor(t)
   };
-  await putEntry(entry);
-  entries.push(entry);
-  if(saveAsTpl){
-    const name=$("tplName").value.trim() || draft.meal || "Saved meal";
-    const tpl={id:"tpl-"+Date.now()+"-"+Math.random().toString(36).slice(2,6),
-      name,description:entry.description,meal:entry.meal,
-      workout:entry.workout,setting:entry.setting,photo:entry.photo,
-      kcal:entry.kcal,protein:entry.protein,carbs:entry.carbs,fat:entry.fat};
-    await putTpl(tpl);
-    templates.push(tpl);
-    renderTplManage();
+  try{
+    await putEntry(entry);
+    entries.push(entry);
+    if(saveAsTpl){
+      const name=$("tplName").value.trim() || draft.meal || "Saved meal";
+      const tpl={id:"tpl-"+Date.now()+"-"+Math.random().toString(36).slice(2,6),
+        name,description:entry.description,meal:entry.meal,
+        workout:entry.workout,setting:entry.setting,photo:entry.photo,
+        kcal:entry.kcal,protein:entry.protein,carbs:entry.carbs,fat:entry.fat};
+      await putTpl(tpl);
+      templates.push(tpl);
+      renderTplManage();
+    }
+    closeSheet();
+    refresh();
+    toast(saveAsTpl?"Logged + saved ✓":"Logged ✓");
+  }catch(err){
+    console.error("save failed",err);
+    btn.disabled=false;
+    const big = err && (err.name==="QuotaExceededError" || /quota/i.test(String(err.message||"")));
+    toast(big ? "Storage full — export a backup, then clear old data" : "Couldn't save the entry — try again");
   }
-  closeSheet();
-  refresh();
-  toast(saveAsTpl?"Logged + saved ✓":"Logged ✓");
 }
 function renderTplManage(){
   const list=$("tplManageList");if(!list)return;list.innerHTML="";
@@ -911,6 +1121,15 @@ async function init(){
   $("hungerInput").oninput=e=>{const v=e.target.value;$("hungerVal").textContent=v==="0"?"—":v;};
   $("saveEntry").onclick=saveEntry;
   $("setWorkoutBtn").onclick=setWorkout;
+
+  $("lookupBtn").onclick=runLookup;
+  $("lookupInput").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();runLookup();}});
+  const savedKey=localStorage.getItem(USDA_KEY_LS); if(savedKey)$("usdaKeyInput").value=savedKey;
+  $("saveUsdaKey").onclick=()=>{
+    const v=$("usdaKeyInput").value.trim();
+    if(v)localStorage.setItem(USDA_KEY_LS,v); else localStorage.removeItem(USDA_KEY_LS);
+    toast(v?"USDA key saved":"USDA key cleared");
+  };
 
   $("exportJson").onclick=exportJson;
   $("exportText").onclick=exportText;
