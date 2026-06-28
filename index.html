@@ -76,7 +76,7 @@
   .feed-title{font-family:var(--display);font-size:15px;font-weight:600}
   .feed-count{font-family:var(--mono);font-size:12px;color:var(--muted)}
   .entry{display:flex;gap:13px;padding:13px;border:1px solid var(--line);border-radius:13px;
-    background:var(--surface);margin-bottom:11px;position:relative}
+    background:var(--surface);margin-bottom:11px;position:relative;cursor:pointer}
   .entry-thumb{width:64px;height:64px;border-radius:9px;object-fit:cover;background:var(--surface2);
     flex-shrink:0}
   .entry-thumb.placeholder{display:flex;align-items:center;justify-content:center;color:var(--muted2);font-size:22px}
@@ -238,6 +238,23 @@
   .lk-add button{padding:9px 15px;border-radius:9px;background:var(--amber);color:#1A1206;font-family:var(--display);font-weight:700;font-size:13px}
   .lk-status{font-size:12.5px;color:var(--muted);padding:7px 2px;line-height:1.4}
 
+  /* barcode scanner */
+  .scan-wide{width:100%;margin-top:9px;padding:11px;border-radius:10px;background:var(--surface3);
+    border:1px solid var(--line-strong);font-family:var(--display);font-weight:600;font-size:14px;color:var(--text);
+    display:flex;align-items:center;justify-content:center;gap:8px}
+  .scan-wide:active{background:var(--surface2)}
+  .scan-overlay{position:fixed;inset:0;z-index:300;background:#000;display:none;flex-direction:column}
+  .scan-overlay.open{display:flex}
+  .scan-head{display:flex;justify-content:space-between;align-items:center;
+    padding:calc(var(--safe-top) + 14px) 18px 14px;color:#fff}
+  .scan-title{font-family:var(--display);font-weight:600;font-size:17px}
+  .scan-close{font-family:var(--mono);font-size:14px;color:var(--amber);padding:6px 4px}
+  .scan-reader{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  #reader{width:100%;max-width:480px}
+  #reader video{width:100% !important;border-radius:0}
+  .scan-status{padding:18px calc(18px + var(--safe-bottom));text-align:center;color:#fff;
+    font-size:13.5px;font-family:var(--mono);min-height:20px}
+
   /* ---------- Tab nav ---------- */
   .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30}
 
@@ -397,6 +414,7 @@
         <input type="text" id="lookupInput" placeholder="e.g. chicken breast, banana, oats">
         <button class="lookup-btn" id="lookupBtn">Search</button>
       </div>
+      <button class="scan-wide" id="scanBtn" type="button">⊞ Scan a barcode</button>
       <div id="lookupResults" class="lookup-results"></div>
     </div>
 
@@ -459,6 +477,15 @@
 </div>
 
 <div class="toast" id="toast"></div>
+
+<div class="scan-overlay" id="scanOverlay">
+  <div class="scan-head">
+    <div class="scan-title">Scan barcode</div>
+    <button class="scan-close" id="scanClose">Done</button>
+  </div>
+  <div class="scan-reader"><div id="reader"></div></div>
+  <div class="scan-status" id="scanStatus">Starting camera…</div>
+</div>
 
 <script>
 /* ============ Config ============ */
@@ -561,6 +588,7 @@ let entries=[];
 let templates=[];
 let saveAsTpl=false;
 let draft={photo:null,meal:null,workout:"none",setting:null,hunger:0,time:null};
+let editingId=null, editingTs=null;
 
 /* ============ Render: header + timeline ============ */
 async function renderHeader(){
@@ -618,7 +646,7 @@ async function renderTimeline(){
 
 /* ============ Render: feed ============ */
 function entryCard(e){
-  const div=document.createElement("div");div.className="entry";
+  const div=document.createElement("div");div.className="entry";div.dataset.id=e.id;
   const thumb=e.photo
     ? `<img class="entry-thumb" src="${e.photo}" alt="">`
     : `<div class="entry-thumb placeholder">🍽</div>`;
@@ -779,6 +807,86 @@ function addLookup(){
   validate();
 }
 
+/* ============ Barcode scanner ============ */
+const SCANNER_SRCS=[
+  "https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js",
+  "https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js",
+  "https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"
+];
+let scannerLibPromise=null, scanner=null, scanned=false;
+function loadScannerLib(){
+  if(window.Html5Qrcode)return Promise.resolve();
+  if(scannerLibPromise)return scannerLibPromise;
+  scannerLibPromise=new Promise((resolve,reject)=>{
+    let i=0;
+    const tryNext=()=>{
+      if(window.Html5Qrcode)return resolve();
+      if(i>=SCANNER_SRCS.length)return reject(new Error("scanner load failed"));
+      const s=document.createElement("script");
+      s.src=SCANNER_SRCS[i++];
+      s.onload=()=>{window.Html5Qrcode?resolve():tryNext();};
+      s.onerror=tryNext;
+      document.head.appendChild(s);
+    };
+    tryNext();
+  });
+  return scannerLibPromise;
+}
+async function openScanner(){
+  toast("Loading scanner…");
+  try{ await loadScannerLib(); }
+  catch(_){ toast("Couldn't load the scanner — check your connection"); return; }
+  scanned=false;
+  $("scanStatus").textContent="Starting camera…";
+  $("scanOverlay").classList.add("open");
+  try{
+    const F=window.Html5QrcodeSupportedFormats;
+    scanner=new Html5Qrcode("reader",{formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.UPC_EAN_EXTENSION]});
+    await scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:270,height:170}},onScanSuccess,()=>{});
+    $("scanStatus").textContent="Point the camera at a product barcode";
+  }catch(err){
+    console.error("scanner start",err);
+    $("scanStatus").textContent="Camera unavailable — check Safari camera permission, then try again";
+  }
+}
+async function closeScanner(){
+  if(scanner){
+    try{ await scanner.stop(); }catch(_){}
+    try{ scanner.clear(); }catch(_){}
+    scanner=null;
+  }
+  $("scanOverlay").classList.remove("open");
+}
+async function onScanSuccess(text){
+  if(scanned)return; scanned=true;
+  $("scanStatus").textContent="Looking up "+text+"…";
+  await closeScanner();
+  const res=await lookupByBarcode(text);
+  if(res===null){ toast("Couldn't reach Open Food Facts"); return; }
+  if(res.notFound){ toast("No product found for "+text); return; }
+  if(res.noMacros){ toast('Found "'+res.name+'" but it has no nutrition data'); return; }
+  renderLookup([res],[]);
+  selectLookup([res],0);
+  try{ $("lookupResults").scrollIntoView({behavior:"smooth",block:"nearest"}); }catch(_){}
+  toast('Found "'+res.name+'"');
+}
+async function lookupByBarcode(code){
+  try{
+    const url="https://world.openfoodfacts.org/api/v2/product/"+encodeURIComponent(code)+
+      ".json?fields=product_name,brands,nutriments";
+    const r=await fetch(url);
+    if(!r.ok)throw new Error("off "+r.status);
+    const d=await r.json();
+    if(d.status!==1||!d.product)return {notFound:true};
+    const p=d.product, n=p.nutriments||{};
+    const kcal=n["energy-kcal_100g"];
+    const name=(p.brands?String(p.brands).split(",")[0]+" — ":"")+(p.product_name||"Unnamed product");
+    if(kcal==null)return {noMacros:true,name};
+    return {source:"off",name,kcal:Math.round(kcal),
+      protein:r1(n.proteins_100g),carbs:r1(n.carbohydrates_100g),fat:r1(n.fat_100g)};
+  }catch(_){ return null; }
+}
+
 function renderFeed(){
   const list=$("feedList");list.innerHTML="";
   const today=entries.filter(e=>dayKey(new Date(e.timestamp))===dayKey(new Date()))
@@ -911,31 +1019,44 @@ function fillFromTemplate(t){
   syncChips();
   toast("Filled from "+t.name);
 }
-function openSheet(prefill){
+function openSheet(src, isEdit){
+  editingId = isEdit ? src.id : null;
+  editingTs = isEdit ? src.timestamp : null;
   draft={photo:null,meal:null,workout:"none",setting:null,hunger:0,time:null};
   $("descInput").value="";$("notesInput").value="";
   $("hungerInput").value=0;$("hungerVal").textContent="—";
   setMacroInputs(null);
   $("lookupInput").value="";$("lookupResults").innerHTML="";lookupSel=null;
+  loadScannerLib().catch(()=>{}); // warm up so iOS camera launches within the tap gesture
   resetPhotoZone();
   setSaveTpl(false);$("tplName").value="";
   renderQuickRow();
-  setNow();syncChips();
-  $("sheetTitle").textContent = prefill ? "Repeat meal" : "Log a meal";
-  if(prefill){
-    draft.meal=prefill.meal||null;
-    draft.workout=prefill.workout||"none";
-    draft.setting=prefill.setting||null;
-    draft.photo=prefill.photo||null;
-    $("descInput").value=prefill.description||"";
-    setMacroInputs(prefill);
-    if(prefill.photo)showPhotoZone(prefill.photo);
+  if(isEdit) setTimeFromTs(src.timestamp); else setNow();
+  syncChips();
+  $("sheetTitle").textContent = isEdit ? "Edit entry" : (src ? "Repeat meal" : "Log a meal");
+  $("saveEntry").textContent = isEdit ? "Update entry" : "Save entry";
+  if(src){
+    draft.meal=src.meal||null;
+    draft.workout=src.workout||"none";
+    draft.setting=src.setting||null;
+    draft.photo=src.photo||null;
+    $("descInput").value=src.description||"";
+    setMacroInputs(src);
+    if(src.photo)showPhotoZone(src.photo);
+    if(isEdit){
+      $("hungerInput").value=src.hunger||0;
+      $("hungerVal").textContent=(src.hunger>0)?src.hunger:"—";
+      $("notesInput").value=src.notes||"";
+    }
     syncChips();
   }
+  validate();
   $("scrim").classList.add("open");$("sheet").classList.add("open");
   document.body.style.overflow="hidden";
 }
+function setTimeFromTs(ts){const d=new Date(ts);$("timeInput").value=pad(d.getHours())+":"+pad(d.getMinutes());}
 function closeSheet(){
+  if($("scanOverlay").classList.contains("open"))closeScanner();
   $("scrim").classList.remove("open");$("sheet").classList.remove("open");
   document.body.style.overflow="";
 }
@@ -957,9 +1078,10 @@ async function saveEntry(){
   if(btn.disabled)return;
   btn.disabled=true;
   const [hh,mm]=($("timeInput").value||"00:00").split(":").map(Number);
-  const t=new Date();t.setHours(hh,mm,0,0);
+  const t = editingId ? new Date(editingTs) : new Date();
+  t.setHours(hh,mm,0,0);
   const entry={
-    id:Date.now()+"-"+Math.random().toString(36).slice(2,7),
+    id: editingId || (Date.now()+"-"+Math.random().toString(36).slice(2,7)),
     timestamp:t.getTime(),
     meal:draft.meal,
     workout:draft.workout,
@@ -976,7 +1098,12 @@ async function saveEntry(){
   };
   try{
     await putEntry(entry);
-    entries.push(entry);
+    if(editingId){
+      const i=entries.findIndex(x=>x.id===editingId);
+      if(i>=0)entries[i]=entry; else entries.push(entry);
+    } else {
+      entries.push(entry);
+    }
     if(saveAsTpl){
       const name=$("tplName").value.trim() || draft.meal || "Saved meal";
       const tpl={id:"tpl-"+Date.now()+"-"+Math.random().toString(36).slice(2,6),
@@ -987,9 +1114,10 @@ async function saveEntry(){
       templates.push(tpl);
       renderTplManage();
     }
+    const wasEdit=!!editingId;
     closeSheet();
-    refresh();
-    toast(saveAsTpl?"Logged + saved ✓":"Logged ✓");
+    refresh();renderHistory();
+    toast(wasEdit ? "Updated ✓" : (saveAsTpl?"Logged + saved ✓":"Logged ✓"));
   }catch(err){
     console.error("save failed",err);
     btn.disabled=false;
@@ -1134,6 +1262,8 @@ async function init(){
 
   $("lookupBtn").onclick=runLookup;
   $("lookupInput").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();runLookup();}});
+  $("scanBtn").onclick=openScanner;
+  $("scanClose").onclick=closeScanner;
   const savedKey=localStorage.getItem(USDA_KEY_LS); if(savedKey)$("usdaKeyInput").value=savedKey;
   $("saveUsdaKey").onclick=()=>{
     const v=$("usdaKeyInput").value.trim();
@@ -1178,6 +1308,12 @@ async function init(){
       templates=templates.filter(x=>x.id!==tplDel.dataset.tpl);
       renderTplManage();
       toast("Quick meal removed");
+      return;
+    }
+    const card=e.target.closest(".entry");
+    if(card&&card.dataset.id){
+      const src=entries.find(x=>x.id===card.dataset.id);
+      if(src)openSheet(src,true);
     }
   });
 
