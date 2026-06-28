@@ -134,10 +134,11 @@
 
   .photo-zone{border:1.5px dashed var(--line-strong);border-radius:14px;background:var(--surface2);
     aspect-ratio:4/3;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:6px;color:var(--muted);overflow:hidden;position:relative}
+    gap:6px;color:var(--muted);overflow:hidden;position:relative;cursor:pointer}
+  #photoContent{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:100%;height:100%}
   .photo-zone .icon{font-size:30px}
   .photo-zone .hint{font-size:13px}
-  .photo-zone img{width:100%;height:100%;object-fit:cover}
+  .photo-zone img{width:100%;height:100%;object-fit:cover;display:block}
   .photo-clear{position:absolute;top:9px;right:9px;background:rgba(0,0,0,0.6);color:#fff;
     width:30px;height:30px;border-radius:50%;font-size:16px;display:flex;align-items:center;justify-content:center}
 
@@ -376,11 +377,13 @@
     </div>
     <div class="field">
       <label class="field-label">Photo (optional)</label>
-      <label class="photo-zone" id="photoZone">
-        <span class="icon">📷</span>
-        <span class="hint">Tap to take or choose a photo</span>
-        <input type="file" id="photoInput" accept="image/*" style="display:none">
-      </label>
+      <div class="photo-zone" id="photoZone">
+        <div id="photoContent">
+          <span class="icon">📷</span>
+          <span class="hint">Tap to take or choose a photo</span>
+        </div>
+      </div>
+      <input type="file" id="photoInput" accept="image/*" style="display:none">
     </div>
 
     <div class="field">
@@ -866,12 +869,12 @@ function setNow(){
   draft.time=n;
 }
 function resetPhotoZone(){
-  $("photoZone").innerHTML=`<span class="icon">📷</span><span class="hint">Tap to take or choose a photo</span><input type="file" id="photoInput" accept="image/*" style="display:none">`;
-  $("photoInput").onchange=handlePhoto;
+  $("photoContent").innerHTML=`<span class="icon">📷</span><span class="hint">Tap to take or choose a photo</span>`;
 }
 function showPhotoZone(data){
-  $("photoZone").innerHTML=`<img src="${data}" alt=""><button class="photo-clear" id="photoClear">✕</button>`;
-  $("photoClear").onclick=(ev)=>{ev.preventDefault();ev.stopPropagation();draft.photo=null;resetPhotoZone();validate();};
+  $("photoContent").innerHTML=`<img src="${data}" alt=""><button class="photo-clear" id="photoClear">✕</button>`;
+  $("photoClear").onclick=(ev)=>{ev.preventDefault();ev.stopPropagation();draft.photo=null;resetPhotoZone();
+    const inp=$("photoInput");if(inp)inp.value="";validate();};
 }
 function setSaveTpl(on){
   saveAsTpl=on;
@@ -937,13 +940,17 @@ function closeSheet(){
   document.body.style.overflow="";
 }
 async function handlePhoto(e){
-  const file=e.target.files[0];if(!file)return;
-  toast("Processing photo…");
-  let data=null;
-  try{ data=await compressImage(file); }catch(_){}
-  if(data){draft.photo=data;showPhotoZone(data);toast("Photo added ✓");}
-  else{toast("Couldn't read that photo — try another");}
-  validate();
+  const file=e.target.files&&e.target.files[0];
+  if(file){
+    toast("Processing photo…");
+    let data=null;
+    try{ data=await compressImage(file); }catch(_){}
+    if(data){draft.photo=data;showPhotoZone(data);toast("Photo added ✓");}
+    else{toast("Couldn't read that photo — try another");}
+    validate();
+  }
+  // clear so picking the same photo again still fires onchange
+  try{ e.target.value=""; }catch(_){}
 }
 async function saveEntry(){
   const btn=$("saveEntry");
@@ -1114,7 +1121,10 @@ async function init(){
   $("saveTplToggle").onclick=()=>setSaveTpl(!saveAsTpl);
   $("closeSheet").onclick=closeSheet;
   $("scrim").onclick=closeSheet;
-  $("photoZone").onclick=(e)=>{const inp=$("photoInput");if(e.target.id!=="photoClear"&&inp)inp.click();};
+  $("photoZone").onclick=(e)=>{
+    if(e.target.closest("#photoClear"))return;
+    const inp=$("photoInput"); if(inp)inp.click();
+  };
   $("photoInput").onchange=handlePhoto;
   $("descInput").oninput=validate;
   $("nowBtn").onclick=setNow;
