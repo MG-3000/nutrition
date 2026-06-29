@@ -252,8 +252,14 @@
   .scan-reader{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden}
   #reader{width:100%;max-width:480px}
   #reader video{width:100% !important;border-radius:0}
-  .scan-status{padding:18px calc(18px + var(--safe-bottom));text-align:center;color:#fff;
+  .scan-status{padding:16px 18px 6px;text-align:center;color:#fff;
     font-size:13.5px;font-family:var(--mono);min-height:20px}
+  .scan-manual{display:flex;gap:8px;padding:10px 18px calc(20px + var(--safe-bottom))}
+  .scan-manual input{flex:1;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);
+    border-radius:10px;padding:12px 13px;color:#fff;font-family:var(--mono);font-size:16px}
+  .scan-manual input::placeholder{color:rgba(255,255,255,0.5)}
+  .scan-manual button{padding:0 20px;border-radius:10px;background:var(--amber);color:#1A1206;
+    font-family:var(--display);font-weight:700;font-size:15px}
 
   /* ---------- Tab nav ---------- */
   .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30}
@@ -485,6 +491,10 @@
   </div>
   <div class="scan-reader"><div id="reader"></div></div>
   <div class="scan-status" id="scanStatus">Starting camera…</div>
+  <div class="scan-manual">
+    <input id="scanManualInput" type="text" inputmode="numeric" placeholder="Or type the barcode digits">
+    <button id="scanManualBtn">Go</button>
+  </div>
 </div>
 
 <script>
@@ -841,9 +851,17 @@ async function openScanner(){
   $("scanOverlay").classList.add("open");
   try{
     const F=window.Html5QrcodeSupportedFormats;
-    scanner=new Html5Qrcode("reader",{formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.UPC_EAN_EXTENSION]});
-    await scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:270,height:170}},onScanSuccess,()=>{});
-    $("scanStatus").textContent="Point the camera at a product barcode";
+    scanner=new Html5Qrcode("reader",{
+      formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.UPC_EAN_EXTENSION,F.CODE_128],
+      experimentalFeatures:{useBarCodeDetectorIfSupported:true}
+    });
+    const qrbox=(vw,vh)=>{
+      const w=Math.floor(Math.min(vw,520)*0.94);
+      const h=Math.floor(Math.min(vh*0.55,300));
+      return {width:w,height:Math.max(140,h)};
+    };
+    await scanner.start({facingMode:"environment"},{fps:15,qrbox,aspectRatio:1.3333},onScanSuccess,()=>{});
+    $("scanStatus").textContent="Center a product barcode in the box";
   }catch(err){
     console.error("scanner start",err);
     $("scanStatus").textContent="Camera unavailable — check Safari camera permission, then try again";
@@ -861,9 +879,20 @@ async function onScanSuccess(text){
   if(scanned)return; scanned=true;
   $("scanStatus").textContent="Looking up "+text+"…";
   await closeScanner();
-  const res=await lookupByBarcode(text);
+  handleBarcode(text);
+}
+async function scanManual(){
+  const code=$("scanManualInput").value.trim();
+  if(!code)return;
+  $("scanManualInput").value="";
+  await closeScanner();
+  handleBarcode(code);
+}
+async function handleBarcode(code){
+  toast("Looking up "+code+"…");
+  const res=await lookupByBarcode(code);
   if(res===null){ toast("Couldn't reach Open Food Facts"); return; }
-  if(res.notFound){ toast("No product found for "+text); return; }
+  if(res.notFound){ toast("No product found for "+code); return; }
   if(res.noMacros){ toast('Found "'+res.name+'" but it has no nutrition data'); return; }
   renderLookup([res],[]);
   selectLookup([res],0);
@@ -1264,6 +1293,8 @@ async function init(){
   $("lookupInput").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();runLookup();}});
   $("scanBtn").onclick=openScanner;
   $("scanClose").onclick=closeScanner;
+  $("scanManualBtn").onclick=scanManual;
+  $("scanManualInput").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();scanManual();}});
   const savedKey=localStorage.getItem(USDA_KEY_LS); if(savedKey)$("usdaKeyInput").value=savedKey;
   $("saveUsdaKey").onclick=()=>{
     const v=$("usdaKeyInput").value.trim();
