@@ -305,6 +305,18 @@
   <div class="screen active" id="screen-today">
     <div class="timeline-wrap">
       <div class="tl-head">
+        <div class="tl-title">Morning check-in</div>
+        <button class="tl-set" id="weightSaveBtn">Save</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:2px">
+        <div style="flex:1"><input id="wtWeight" type="number" inputmode="decimal" placeholder="Weight" style="width:100%;background:var(--surface);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:9px;font-family:var(--mono);font-size:14px"><div style="font-family:var(--mono);font-size:9px;color:var(--muted2);text-align:center;margin-top:3px">LB</div></div>
+        <div style="flex:1"><input id="wtBodyFat" type="number" inputmode="decimal" placeholder="BF" style="width:100%;background:var(--surface);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:9px;font-family:var(--mono);font-size:14px"><div style="font-family:var(--mono);font-size:9px;color:var(--muted2);text-align:center;margin-top:3px">BODY FAT %</div></div>
+        <div style="flex:1"><input id="wtWaist" type="number" inputmode="decimal" placeholder="Waist" style="width:100%;background:var(--surface);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:9px;font-family:var(--mono);font-size:14px"><div style="font-family:var(--mono);font-size:9px;color:var(--muted2);text-align:center;margin-top:3px">WAIST IN</div></div>
+      </div>
+    </div>
+
+    <div class="timeline-wrap" style="padding-top:6px">
+      <div class="tl-head">
         <div class="tl-title">Today's timing</div>
         <button class="tl-set" id="setWorkoutBtn">+ Workout time</button>
       </div>
@@ -1414,6 +1426,36 @@ async function importFromChat(){
   await pushNutrition(date);
 }
 
+async function saveWeight(){
+  const base=localStorage.getItem(SYNC_BASE_LS)||SYNC_BASE_DEFAULT;
+  const token=localStorage.getItem(SYNC_TOKEN_LS)||"";
+  const date=dayKey(new Date());
+  const payload={date};
+  const w=$("wtWeight").value, bf=$("wtBodyFat").value, wa=$("wtWaist").value;
+  if(w!=="")payload.weight=Number(w);
+  if(bf!=="")payload.bodyFat=Number(bf);
+  if(wa!=="")payload.waist=Number(wa);
+  if(payload.weight==null&&payload.bodyFat==null&&payload.waist==null){toast("Enter at least one value");return;}
+  await setMeta("body_"+date,JSON.stringify(payload));
+  if(!token){toast("Saved on device — add token in Dashboard sync to push");return;}
+  try{
+    const res=await fetch(base+"/weight",{method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+      body:JSON.stringify(payload)});
+    if(!res.ok)throw new Error("HTTP "+res.status);
+    toast("Check-in saved \u2713");
+  }catch(err){toast("Saved on device · push failed: "+err.message);}
+}
+async function prefillWeight(){
+  const raw=await getMeta("body_"+dayKey(new Date()));
+  if(!raw)return;
+  try{const b=JSON.parse(raw);
+    if(b.weight!=null)$("wtWeight").value=b.weight;
+    if(b.bodyFat!=null)$("wtBodyFat").value=b.bodyFat;
+    if(b.waist!=null)$("wtWaist").value=b.waist;
+  }catch(_){}
+}
+
 /* ============ Init ============ */
 async function init(){
   await openDB();
@@ -1461,6 +1503,8 @@ async function init(){
   };
 
   loadSyncCfg();
+  prefillWeight();
+  $("weightSaveBtn").onclick=saveWeight;
   $("chatImportBtn").onclick=importFromChat;
   $("syncSave").onclick=saveSyncCfg;
   $("syncPushBtn").onclick=()=>pushNutrition(dayKey(new Date()));
